@@ -1,0 +1,272 @@
+                 Manual for ExtractRINKO
+                                  (Version 1.6 Open)
+
+
+
+
+The RINKO EC sensor (model name: ARO-EC-CM) produced by JFE Advantech Co,
+Ltd is a fast-responding dual oxygen-temperature senor developed for Aquatic Eddy
+Covariance (AEC) measurements. It is tested and described by Berg et al. (2016). The
+sensor is designed to “plug-and-play connect” with a standard Nortek Vector acoustic
+Doppler velocimeter (the workhorse of all AEC measurements to date) through a single
+cable for power and data transfer. It is the most robust sensor developed for AEC, and it
+allows eddy fluxes of oxygen and heat to be determined simultaneously. It also allows
+direct correction of the oxygen signal for temperature sensitivity – a feature that is
+critically important if used to measure gas exchange right below the air-water interface
+where heat fluxes, and thus the associated rapid temperature fluctuations, can be
+substantial and bias the oxygen flux calculation (for details see Berg and Pace; 2017).
+Due to its large tip size (Ø8 mm), the RINKO EC sensor may disturb the flow recordings
+if the current flow passes directly over the sensor tip before reaching the velocimeter.
+
+This manual describes how RINKO EC data recorded by the Nortek Vector is processed
+to obtain accurate AEC measurements corrected for water temperature, salinity, and
+atmospheric pressure (or altitude above sea level).
+
+1. Input files
+
+ExtractRINKO needs two input files. One is the standard Nortek Vector data file that has
+been converted from a binary to a text file using the Nortek software that comes with the
+Vector. The file has 18 columns and contain the measured x, y, and z velocities (column
+3, 4, 5), the water pressure (column 15), the oxygen concentration signal in counts
+(column 16), and the temperature signal in counts (column 17). For more details, see
+the Nortek Vector manual.
+
+The second file is referred to as the “definition” file and it defines how measured data
+are processed. An example of how it is structured is given in Fig. 1. The line numbers in
+the left margin are not part of the input file. Also, the input file contains some text, which
+is not used by ExtractRINKO, but serves only as a help for the user. Only the text and
+values in the red frame are read and used. The input file is a text file and can be created
+and changed in a program like Office Notepad, for example.
+
+
+
+
+Figure. 1: The definition file which describes how recorded data are processed by
+ExtractRINKO.
+
+The lines in the input file specify the following information:
+
+Line1: Not used by ExtractRINKO but serves as a description of the data in the input
+file. A user can freely use this for helpful notes. As a minimum, a blank line must be
+given.
+
+Line 2: Name of the standard Vector file after conversion with data to be processed.
+
+Line 3: Name of the output file from ExtractRINKO. See details on its format below
+(Line 24).
+
+                                              2
+Line 4: Start time (in hours) of the recorded data. This will be the first time point in the
+output file from ExtractRINKO.
+
+Line 5: Frequency of the continuously measured input data (in Hz).
+
+Line 6: Frequency of data written to the ExtractRINKO output file (in Hz).
+
+Line 7: Correction (offset) of the pressure sensor reading. The given value (in mbar) is
+subtracted from the Vector’s pressure reading.
+
+Line 8: Water salinity (in ppt).
+
+Line 9: Flag equal to 0 or 1.
+   a) Flag = 0: Oxygen saturation concentration is calculated from a given site
+      elevation above sea level (Line 10)
+   b) Flag = 1: Oxygen saturation concentration is calculated from a known atm
+      pressure on site (in mbar).
+
+Line 10: Elevation above sea level (in m). Only used if flag above is 0.
+
+Line 11: Actual atm pressure (in mbar) Only used if flag above is 1.
+
+Line 12-15: Constants used to calculate the temperature. These constants are specific
+for each RINKO EC sensor and are provided by the manufacture.
+
+Line 16-23: Constants used to calculate the oxygen concentration. These constants
+are specific for each RINKO EC sensor and type of foil disc mounted on the sensor tip.
+These constants, or ways to determine them, are provided by the manufacture.
+
+Line24: Flag equal to 0, 2, 3, 4, 5 or 6. The output file from ExtractRINKO contains six
+columns. The first four are not affected by this flag. Column 1 is the time (in hours), and
+columns 2, 3, and 4 are the x, y, and z velocity (in cm s-1). Columns 5 and 6 contain the
+following data depending on the flag:
+    a) Flag = 0: The oxygen concentration signal in counts and the temperature signal
+       in counts, both averaged to the output frequency (line 6).
+    b) Flag = 1: The temperature (in °C) and the oxygen saturation concentration (in
+       µmol L-1) at the measured temperature, and the given salinity (Line 8), elevation
+       above sea level (Line 10), or atm pressure (Line 11).
+    c) Flag = 2: The temperature (in °C) and the pressure (in mbar).
+    d) Flag = 3: The oxygen concentration (in µmol L-1) and the pressure (in mbar).
+    e) Flag = 4: The temperature (in °C) and the oxygen concentration (in µmol L-1).
+    f) Flag = 5: The oxygen concentration (in µmol L-1) and the temperature (in °C).
+    g) Flag = 6: The oxygen concentration (in µmol L-1) and the oxygen saturation
+       concentration (in µmol L-1) at the measured temperature, given salinity (Line 8),
+       and elevation above sea level (Line 10), or atm pressure (Line 11).
+
+
+                                              3
+Line25-30: The calculated oxygen concentration can be calibrated against auxiliary
+data, for example measured with a slow-responding stable sensor using a calibration
+factor that is multiplied with the oxygen concentration. The factor can vary through time
+as determined using two line segments (see figure below). The line segments are
+defined by three points in time (Line 25-27) and values of the factor at these times (Line
+28-30). For times outside the first and last points in time (Line 25, 27), the factor equal
+the values specified for these times (Line 28, 30). See details below.
+
+Line31-34: The oxygen concentration can also be calibrated using a calibration factor
+that varies with the oxygen concentration (see figure below). In this case, two oxygen
+concentrations are given (Line 31, 32) as are the values of the factor for these
+concentrations (Line 33, 34). The factor varies linearly between and beyond these given
+values. See details below.
+
+2. The calculation
+
+The data processing by ExtractRINKO is done in several steps, which are outline below.
+After the definition file and the converted Nortek Vector file are read, an air pressure
+correction factor is calculated based on the values given in Line 9-11:
+                                                           1013.25−𝑧𝑧 0.11568
+                       Flag = 0:        𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓 =                                       (1)
+                                                                     1013.25
+or
+                                                               𝑝𝑝
+                       Flag = 1:        𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓 =                                       (2)
+                                                           1013.25
+
+where z is the elevation above sea level and p is the actual atm pressure.
+
+A timeline is calculated based on the information given in Line 4-5:
+
+                                                                𝑖𝑖
+                         ℎ𝑜𝑜𝑜𝑜𝑜𝑜𝑖𝑖 = ℎ𝑜𝑜𝑜𝑜𝑜𝑜𝑠𝑠𝑠𝑠𝑠𝑠𝑠𝑠𝑠𝑠 +                                     (3)
+                                                           3600 𝐻𝐻𝐻𝐻
+
+where i is a counter (1, 2, 3,…, and equal to the line number in the converted Nortek
+Vector data file). hourstart is the start time of the recorded data (Line 4) and Hz is the
+frequency of the input data (Line 5).
+
+The unit of velocities are converted to cm s-1. The unit of the Vector’s pressure reading
+is converted to mbar and correct with the specified offset (Line 7).
+
+The oxygen concentration and temperature signals, both in counts, are converted to a
+voltage between 0 and 5 Volt:
+                                                               5 𝑝𝑝
+                                                              𝑖𝑖
+                                             𝑣𝑣𝑣𝑣𝑣𝑣𝑣𝑣1𝑖𝑖 = 65535                             (4)
+and
+
+
+                                                           4
+                                                                          5 𝑞𝑞
+                                                                       𝑖𝑖
+                                                      𝑣𝑣𝑣𝑣𝑣𝑣𝑣𝑣2𝑖𝑖 = 65535                                                             (5)
+
+where pi and qi are the counts of the oxygen concentration and temperature reading by
+the RINKO EC.
+
+The high temporal resolution water temperature is calculated as specified by the RINKO
+EC manufacture as:
+                                                                              2                  3
+                          𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑖𝑖 = 𝐴𝐴𝐴𝐴 + 𝐵𝐵𝐵𝐵 𝑣𝑣𝑣𝑣𝑣𝑣𝑣𝑣2𝑖𝑖 + 𝐶𝐶𝐶𝐶 𝑣𝑣𝑣𝑣𝑣𝑣𝑣𝑣2𝑖𝑖 + 𝐷𝐷𝐷𝐷 𝑣𝑣𝑣𝑣𝑣𝑣𝑣𝑣2𝑖𝑖                                  (6)
+
+where the coefficients AT, BT, CT, and DT are given in the definition file (Line 12-15).
+
+The calculation of the high temporal resolution oxygen concentration is done in several
+steps. First the oxygen saturation concentration is calculated as a function of the water
+temperature (Eq. 6), salinity (Line 8), and the air pressure correction factor (Eqs. 1, 2):
+
+                                O2 𝑠𝑠𝑠𝑠𝑠𝑠 𝑑𝑑𝑑𝑑𝑑𝑑 𝑖𝑖 = O2 𝑠𝑠𝑠𝑠𝑠𝑠 𝑖𝑖 𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑 𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓𝑓                                        (7)
+
+where O2 𝑠𝑠𝑠𝑠𝑠𝑠 𝑖𝑖 is calculated as outlined by Garcia and Gordon (1992). The variable
+𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑𝑑 serves as a unit conversion factor to give O2 𝑠𝑠𝑠𝑠𝑠𝑠 𝑑𝑑𝑑𝑑𝑑𝑑 𝑖𝑖 the unit µmol L-1 and is
+calculated as described in “Standard Methods for the Examination of Water and
+Wastewater” (1999):
+https://beta-
+static.fishersci.com/content/dam/fishersci/en_US/documents/programs/scientific/technic
+al-documents/white-papers/apha-water-testing-standard-methods-introduction-white-
+paper.pdf
+
+Then the actual oxygen concentration in percent is calculated as:
+
+O2 pct 𝑖𝑖 =
+                                    𝐴𝐴𝐴𝐴2                                                       𝐵𝐵𝐵𝐵2
+ 𝐺𝐺𝐺𝐺2 + 𝐻𝐻𝐻𝐻2 �                                             +                                                                    �   (8)
+               1+𝐷𝐷𝐷𝐷2(𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑖𝑖 −25)+𝐹𝐹𝐹𝐹2(𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑖𝑖−25)2   𝑣𝑣𝑣𝑣𝑣𝑣𝑣𝑣1𝑖𝑖 (1+𝐷𝐷𝐷𝐷2(𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑖𝑖−25)+𝐹𝐹𝐹𝐹2(𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑡𝑖𝑖 −25)2 )+𝐶𝐶𝐶𝐶2
+
+
+where the coefficients AO2, BO2, CO2, DO2, FO2, GO2, and HO2 are given in the
+definition file (Line 16-23). The RINKO EC manual describes an additional correction
+associated with the water pressure at deployment depth. However, because the current
+version of the standard RINKO EC sensor can only be deployed to a water depth of 50
+m this correction is negatable (<0.02%). Thus, the coefficient EO2 given in the definition
+file (Line 20) is not used by ExtractRINKO.
+
+
+Finally, the high temporal resolution oxygen concentration is calculated as
+                                                       O2 pct 𝑖𝑖 O2 𝑠𝑠𝑠𝑠𝑠𝑠 𝑑𝑑𝑑𝑑𝑑𝑑 𝑖𝑖
+                                            O2𝑖𝑖 =                                                                                    (9)
+                                                                  100
+
+
+
+
+                                                                    5
+The optional time-dependent calibration of the calculated oxygen concentration outlined
+above is defined by the six variables (Line 25-30): Time 1, Time 2, Time 3, Factor 1,
+Factor 2, and Factor 3. Their values are illustrated in Fig. 2. If no correction is needed,
+Factor 1, Factor 2, and Factor 3 are given the value 1.
+
+
+
+
+Figure 2: Optional correction factor as a function of time. For times < Time 1, the correction
+factor equals Factor 1. For times > Time 3, the correction factor equals Factor 3.
+
+The optional concentration-dependent calibration of the oxygen concentration is defined
+by the four variables (Line 31-34): Oxygen conc. 1, Oxygen conc. 2. Factor 4, and
+Factor 5. Their values are illustrated in Fig. 3. If no correction is needed, Factor 4 and
+Factor 5 are given the value 1.
+
+After these calculations are done, the results are averaged down to the specified output
+frequency (Line 6) and written to the specified output file (Line 3).
+
+3. Source and executable code
+
+ExtractRINKO is programmed in Fortran (source code freely available for download).
+Almost all of the code satisfies the Fortran 90 standard. One exception is that 132
+characters per line are used, but most compilers will allow this as an option. The source
+code file is named: ExtractRINKOver1.6open.for.
+
+
+
+
+                                                6
+The compiled code (also freely available for download) can be executed on any PC
+based computer and will perform all calculations in double pressions (~16 significant
+digits). The code must be located in the same directory as the two input files, and is run
+by double-clicking on it. The executable file is named: ExtractRINKOver1.6open.exe.
+
+This manual, the source and executable code files, and an example definition file can
+be downloaded from:
+
+     1) https://berg.evsc.virginia.edu/
+or
+     2) https://www.vcrlter.virginia.edu/
+
+
+
+
+Figure 3: Optional linear concentration-dependent correction factor as a function of the oxygen
+concentration. A linear extrapolation of the factor is used below Oxygen conc. 1 and above
+Oxygen conc. 2.
+
+4. References:
+
+Berg, P., D. Koopmans, M. Huettel, H. Li, K. Mori, and A. Wüest. 2016. A new robust dual oxygen-temperature
+         sensor for aquatic eddy covariance measurements. Limnol. Oceanogr.: Methods 14: 151–167.
+Berg, P., and M. L. Pace. 2017. Continuous measurement of air–water gas exchange by underwater eddy covariance.
+         Biogeosciences 14: 5595-5606.
+Garcia, H. E., and L. I. Gordon. 1992. Oxygen solubility in seawater: Better fitting equations. Limnology and
+         Oceanography 37: 1307-1312.
+
+
+                                                      7
+
