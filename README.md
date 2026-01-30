@@ -54,6 +54,15 @@ Configuration uses `vector_formatter.ini`:
 - Output defaults to the same path with a `.ini` extension.
 
 ## Quick start
+### Python environment
+Create and activate a virtual environment, then install dependencies:
+```
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
 Convert a legacy `.def` file to INI:
 ```
 python src/def_to_ini.py C:\Users\geryatejina\OneDrive\dev\aec_project\sample_data\sample.def
