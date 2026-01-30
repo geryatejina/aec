@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 import argparse
 import configparser
+from datetime import datetime, timedelta
 import math
 import re
+import csv
 try:
     import numpy as np
 except ModuleNotFoundError:  # pragma: no cover - lightweight fallback when numpy isn't available
@@ -42,23 +44,24 @@ class ColumnMap:
 @dataclass(frozen=True)
 class Definition:
     input_file: str
-    output_file: str
+    output_id: str
     hour_start_input: float
     hour_start: float
     hour_end_output: float
     hz: float
     hz_out: float
-    pr_offset: float
+    pressure_offset: float
     salinity: float
-    flag_pr: int
-    elevation_m: float
-    atmpr_mbar: float
-    temp_coeffs: Sequence[float]  # at, bt, ct, dt
-    o2_coeffs: Sequence[float]  # ao2, bo2, co2, do2, eo2, fo2, go2, ho2
+    pressure_reference: str  # "elevation" or "atmospheric_pressure"
+    elevation: float
+    atmospheric_pressure: float
+    temperature_calibration_coefficients: Sequence[float]  # at, bt, ct, dt
+    o2_calibration_coefficients: Sequence[float]  # ao2, bo2, co2, do2, eo2, fo2, go2, ho2
     time_points: Sequence[float]  # time1, time2, time3
     time_factors: Sequence[float]  # o2factor1, o2factor2, o2factor3
     o2_points: Sequence[float]  # o24, o25
     o2_factors: Sequence[float]  # o2factor4, o2factor5
+    start_datetime: datetime | None
 
 
 # Hard-coded output columns (edit when the final column set is defined).
@@ -72,6 +75,28 @@ OUTPUT_COLUMNS: Sequence[str] = (
     "o2_umol_l",
     "o2sat_umol_l",
 )
+
+OUTPUT_LABELS: Dict[str, str] = {
+    "hour": "TIMESTAMP",
+    "vx": "U",
+    "vy": "V",
+    "vz": "W",
+    "pr_mbar": "P",
+    "temp_c": "T",
+    "o2_umol_l": "O2",
+    "o2sat_umol_l": "O2_SAT",
+}
+
+OUTPUT_UNITS: Dict[str, str] = {
+    "hour": "[yyyymmddTHHMM.sssssss]",
+    "vx": "[cm s-1]",
+    "vy": "[cm s-1]",
+    "vz": "[cm s-1]",
+    "pr_mbar": "[mbar]",
+    "temp_c": "[degC]",
+    "o2_umol_l": "[umol L-1]",
+    "o2sat_umol_l": "[umol L-1]",
+}
 
 
 DEFAULT_FLOAT_FORMAT = "{:.6f}"
@@ -95,34 +120,38 @@ def parse_ini_file(path: Path) -> Definition:
             raise ValueError(f"Missing [{name}] section in {path}")
         return config[name]
 
+    def _section_any(names: Sequence[str]) -> configparser.SectionProxy:
+        for name in names:
+            if name in config:
+                return config[name]
+        raise ValueError(f"Missing section (expected one of {', '.join(names)}) in {path}")
+
     paths = _section("paths")
     sampling = _section("sampling")
     environment = _section("environment")
-    temp_coeffs_section = _section("temp_coeffs")
-    o2_coeffs_section = _section("o2_coeffs")
+    temp_coeffs_section = _section_any(["temperature_calibration_coefficients", "temp_coeffs"])
+    o2_coeffs_section = _section_any(["o2_calibration_coefficients", "o2_coeffs"])
     time_cal = _section("calibration_time")
     conc_cal = _section("calibration_concentration")
 
     input_file = paths.get("input_file", "")
-    output_file = paths.get("output_file", "").strip()
-    if not output_file:
-        default_name = f"{Path(input_file).stem}_formatted.dat"
-        output_file = default_name
+    output_id = paths.get("output_id", "").strip() or "reformatted"
 
     hour_start = sampling.getfloat("hour_start_output", fallback=sampling.getfloat("hour_start"))
     hour_start_input = sampling.getfloat("hour_start_input", fallback=hour_start)
     hour_end_output = sampling.getfloat("hour_end_output", fallback=hour_start)
     hz = sampling.getfloat("hz")
     hz_out = sampling.getfloat("hz_out")
+    start_datetime = _parse_start_datetime(sampling.get("start_date", fallback=""), sampling.get("start_time", fallback=""))
 
-    pr_offset = environment.getfloat("pr_offset")
+    pressure_offset = environment.getfloat("pressure_offset", fallback=environment.getfloat("pr_offset"))
     salinity = environment.getfloat("salinity")
-    flag_pr = environment.getint("flag_pr")
-    elevation_m = environment.getfloat("elevation_m")
-    atmpr_mbar = environment.getfloat("atmpr_mbar")
+    pressure_reference = _parse_pressure_reference(environment.get("pressure_reference", fallback=environment.get("flag_pr", fallback="elevation")))
+    elevation = environment.getfloat("elevation", fallback=environment.getfloat("elevation_m", fallback=0.0))
+    atmospheric_pressure = environment.getfloat("atmospheric_pressure", fallback=environment.getfloat("atmpr_mbar", fallback=0.0))
 
-    temp_coeffs = _float_list(temp_coeffs_section.get("coeffs", ""), expected=4)
-    o2_coeffs = _float_list(o2_coeffs_section.get("coeffs", ""), expected=8)
+    temperature_calibration_coefficients = _read_temperature_coeffs(temp_coeffs_section)
+    o2_calibration_coefficients = _read_o2_coeffs(o2_coeffs_section)
 
     time_points = _float_list(time_cal.get("time_points", ""), expected=3)
     time_factors = _float_list(time_cal.get("factors", ""), expected=3)
@@ -131,6 +160,62 @@ def parse_ini_file(path: Path) -> Definition:
 
     fields = Definition.__dataclass_fields__.keys()
     return Definition(**{name: locals()[name] for name in fields})
+
+
+def _parse_pressure_reference(raw: str) -> str:
+    value = raw.strip().lower()
+    if value in {"0", "elevation", "altitude"}:
+        return "elevation"
+    if value in {"1", "atmospheric_pressure", "atmospheric", "pressure"}:
+        return "atmospheric_pressure"
+    raise ValueError(f"Invalid pressure_reference value: {raw!r}")
+
+
+def _read_temperature_coeffs(section: configparser.SectionProxy) -> List[float]:
+    if section.get("AT", fallback="") and section.get("BT", fallback=""):
+        return [
+            section.getfloat("AT"),
+            section.getfloat("BT"),
+            section.getfloat("CT"),
+            section.getfloat("DT"),
+        ]
+    raw = section.get("coefficients", fallback=section.get("coeffs", ""))
+    return _float_list(raw, expected=4)
+
+
+def _read_o2_coeffs(section: configparser.SectionProxy) -> List[float]:
+    if section.get("AO2", fallback="") and section.get("BO2", fallback=""):
+        return [
+            section.getfloat("AO2"),
+            section.getfloat("BO2"),
+            section.getfloat("CO2"),
+            section.getfloat("DO2"),
+            section.getfloat("EO2"),
+            section.getfloat("FO2"),
+            section.getfloat("GO2"),
+            section.getfloat("HO2"),
+        ]
+    raw = section.get("coefficients", fallback=section.get("coeffs", ""))
+    return _float_list(raw, expected=8)
+
+
+def _parse_start_datetime(raw_date: str, raw_time: str) -> datetime | None:
+    date_str = raw_date.strip()
+    time_str = raw_time.strip()
+    if not date_str and not time_str:
+        return None
+    if not date_str or not time_str:
+        raise ValueError("Both start_date and start_time must be provided together.")
+
+    date_formats = ["%Y%m%d", "%Y-%m-%d"]
+    time_formats = ["%H:%M", "%H:%M:%S"]
+    for d_fmt in date_formats:
+        for t_fmt in time_formats:
+            try:
+                return datetime.strptime(f"{date_str} {time_str}", f"{d_fmt} {t_fmt}")
+            except ValueError:
+                continue
+    raise ValueError(f"Invalid start_date/start_time format: {raw_date!r} {raw_time!r}")
 
 
 def o2sat(temp_c: float, sal: float) -> float:
@@ -172,11 +257,11 @@ def temp_rinko(temp_coeffs: Sequence[float], volt: float) -> float:
     return np.poly1d([dt, ct, bt, at])(volt)
 
 
-def elevation_corr(flag_pr: int, elevation_m: float, atmpr_mbar: float) -> float:
+def elevation_corr(pressure_reference: str, elevation: float, atmospheric_pressure: float) -> float:
     # Air-pressure correction factor.
-    if flag_pr == 0:
-        return (1013.25 - elevation_m * 0.11568) / 1013.25
-    return atmpr_mbar / 1013.25
+    if pressure_reference == "elevation":
+        return (1013.25 - elevation * 0.11568) / 1013.25
+    return atmospheric_pressure / 1013.25
 
 
 def _time_factor(hour: float, time_points: Sequence[float], factors: Sequence[float]) -> float:
@@ -308,14 +393,42 @@ def _resample_all(
     return out
 
 
-def _format_row(values: Sequence[float]) -> str:
-    # Single-line numeric output, space-separated.
-    return " ".join(DEFAULT_FLOAT_FORMAT.format(v) for v in values)
+def _format_timestamp(hour_value: float, *, start_datetime: datetime | None, hour_start_ref: float) -> str:
+    if start_datetime is None:
+        return DEFAULT_FLOAT_FORMAT.format(hour_value)
+    delta_seconds = (hour_value - hour_start_ref) * 3600.0
+    ts = start_datetime + timedelta(seconds=delta_seconds)
+    minute_floor = ts.replace(second=0, microsecond=0)
+    frac_minutes = (ts - minute_floor).total_seconds() / 60.0
+    return f"{ts.strftime('%Y%m%dT%H%M')}{f'{frac_minutes:.7f}'[1:]}"
 
 
-def _chunk_output_path(base: Path, chunk_index: int) -> Path:
-    # Output file per 30-minute (or configured) chunk.
-    return base.with_name(f"{base.stem}_chunk{chunk_index:04d}{base.suffix}")
+def _format_row_values(values: Sequence[float], columns: Sequence[str], *, start_datetime: datetime | None, hour_start_ref: float) -> List[str]:
+    # CSV-ready formatting with timestamp handling.
+    formatted: List[str] = []
+    for col, val in zip(columns, values):
+        if col == "hour":
+            formatted.append(_format_timestamp(val, start_datetime=start_datetime, hour_start_ref=hour_start_ref))
+        else:
+            formatted.append(DEFAULT_FLOAT_FORMAT.format(val))
+    return formatted
+
+
+def _chunk_output_path(
+    base: Path,
+    start_hour: float,
+    end_hour: float,
+    *,
+    start_datetime: datetime | None,
+    hour_start_ref: float,
+) -> Path:
+    # Output file per chunk using the start datetime if available.
+    if start_datetime is not None:
+        offset_hours = start_hour - hour_start_ref
+        chunk_dt = start_datetime + timedelta(hours=offset_hours)
+        stamp = chunk_dt.strftime("%Y%m%dT%H%M")
+        return base.with_name(f"{base.stem}_{stamp}{base.suffix}")
+    return base.with_name(f"{base.stem}_h{start_hour:08.4f}-h{end_hour:08.4f}{base.suffix}")
 
 
 def process_definition(
@@ -334,9 +447,8 @@ def process_definition(
     if not input_path.is_absolute():
         input_path = ini_path.parent / input_path
 
-    output_path = Path(definition.output_file)
-    if not output_path.is_absolute():
-        output_path = ini_path.parent / output_path
+    output_base = f"{Path(definition.input_file).stem}_{definition.output_id}.dat"
+    output_path = ini_path.parent / output_base
 
     if target_hz is None:
         # Default: no resampling unless explicitly requested.
@@ -346,7 +458,7 @@ def process_definition(
     if chunk_samples <= 0:
         raise ValueError("chunk_minutes must be > 0")
 
-    factor = elevation_corr(definition.flag_pr, definition.elevation_m, definition.atmpr_mbar)
+    factor = elevation_corr(definition.pressure_reference, definition.elevation, definition.atmospheric_pressure)
 
     buffer: Dict[str, List[float]] = {
         "vx": [],
@@ -390,18 +502,18 @@ def process_definition(
             vx.append(buffer["vx"][i] * 100.0)
             vy.append(buffer["vy"][i] * 100.0)
             vz.append(buffer["vz"][i] * 100.0)
-            pr_mbar.append(buffer["pr"][i] * 100.0 - definition.pr_offset)
+            pr_mbar.append(buffer["pr"][i] * 100.0 - definition.pressure_offset)
 
             volt1 = 5.0 * buffer["p_counts"][i] / 65535.0
             volt2 = 5.0 * buffer["q_counts"][i] / 65535.0
 
-            temp = temp_rinko(definition.temp_coeffs, volt2)
+            temp = temp_rinko(definition.temperature_calibration_coefficients, volt2)
             temp_c.append(temp)
             sat_den = o2sat(temp, definition.salinity) * density(temp, definition.salinity) * factor
             o2sat_umol_l.append(sat_den)
 
             o2_val = o2_rinko(
-                definition.o2_coeffs,
+                definition.o2_calibration_coefficients,
                 temp,
                 volt1,
                 sat_den,
@@ -427,13 +539,32 @@ def process_definition(
 
         series = _resample_all(series, definition.hz, target_hz, resample_mode)
 
-        out_path = _chunk_output_path(output_path, chunk_index)
-        with out_path.open("w", encoding="utf-8", newline="\n") as handle:
-            handle.write(" ".join(output_columns) + "\n")
+        start_hour = series["hour"][0] if series["hour"] else 0.0
+        end_hour = series["hour"][-1] if series["hour"] else 0.0
+        out_path = _chunk_output_path(
+            output_path,
+            start_hour,
+            end_hour,
+            start_datetime=definition.start_datetime,
+            hour_start_ref=definition.hour_start,
+        )
+        with out_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle, lineterminator="\n")
+            labels = [OUTPUT_LABELS.get(col, col) for col in output_columns]
+            units = [OUTPUT_UNITS.get(col, "") for col in output_columns]
+            writer.writerow(labels)
+            writer.writerow(units)
             length = len(series["hour"])
             for i in range(length):
                 row = [_series_value(series, col, i) for col in output_columns]
-                handle.write(_format_row(row) + "\n")
+                writer.writerow(
+                    _format_row_values(
+                        row,
+                        output_columns,
+                        start_datetime=definition.start_datetime,
+                        hour_start_ref=definition.hour_start,
+                    )
+                )
 
         chunk_index += 1
 

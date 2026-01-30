@@ -72,22 +72,24 @@ def parse_def_file(path: Path) -> dict:
     o2factor4 = nums[cursor]; cursor += 1
     o2factor5 = nums[cursor]; cursor += 1
 
+    output_id = _derive_output_id(input_file, output_file)
+    pressure_reference = "elevation" if flag_pr == 0 else "atmospheric_pressure"
     return {
         "input_file": input_file,
-        "output_file": output_file,
+        "output_id": output_id,
         "hour_start_input": hour_start_input,
         "hour_start_output": hour_start_output,
         "hour_end_output": hour_end_output,
         "hour_start": hour_start,
         "hz": hz,
         "hz_out": hz_out,
-        "pr_offset": pr_offset,
+        "pressure_offset": pr_offset,
         "salinity": salinity,
-        "flag_pr": flag_pr,
-        "elevation_m": elevation_m,
-        "atmpr_mbar": atmpr_mbar,
-        "temp_coeffs": [at, bt, ct, dt],
-        "o2_coeffs": [ao2, bo2, co2, do2, eo2, fo2, go2, ho2],
+        "pressure_reference": pressure_reference,
+        "elevation": elevation_m,
+        "atmospheric_pressure": atmpr_mbar,
+        "temperature_calibration_coefficients": [at, bt, ct, dt],
+        "o2_calibration_coefficients": [ao2, bo2, co2, do2, eo2, fo2, go2, ho2],
         "time_points": [time1, time2, time3],
         "time_factors": [o2factor1, o2factor2, o2factor3],
         "o2_points": [o24, o25],
@@ -99,7 +101,7 @@ def write_ini(data: dict, output_path: Path) -> None:
     config = configparser.ConfigParser()
     config["paths"] = {
         "input_file": str(data["input_file"]),
-        "output_file": str(data["output_file"]),
+        "output_id": str(data["output_id"]),
     }
     config["sampling"] = {
         "hour_start_input": str(data["hour_start_input"]),
@@ -110,17 +112,29 @@ def write_ini(data: dict, output_path: Path) -> None:
         "hz_out": str(data["hz_out"]),
     }
     config["environment"] = {
-        "pr_offset": str(data["pr_offset"]),
+        "pressure_offset": str(data["pressure_offset"]),
         "salinity": str(data["salinity"]),
-        "flag_pr": str(data["flag_pr"]),
-        "elevation_m": str(data["elevation_m"]),
-        "atmpr_mbar": str(data["atmpr_mbar"]),
+        "pressure_reference": str(data["pressure_reference"]),
+        "elevation": str(data["elevation"]),
+        "atmospheric_pressure": str(data["atmospheric_pressure"]),
     }
-    config["temp_coeffs"] = {
-        "coeffs": ", ".join(str(v) for v in data["temp_coeffs"]),
+    at, bt, ct, dt = data["temperature_calibration_coefficients"]
+    config["temperature_calibration_coefficients"] = {
+        "AT": str(at),
+        "BT": str(bt),
+        "CT": str(ct),
+        "DT": str(dt),
     }
-    config["o2_coeffs"] = {
-        "coeffs": ", ".join(str(v) for v in data["o2_coeffs"]),
+    ao2, bo2, co2, do2, eo2, fo2, go2, ho2 = data["o2_calibration_coefficients"]
+    config["o2_calibration_coefficients"] = {
+        "AO2": str(ao2),
+        "BO2": str(bo2),
+        "CO2": str(co2),
+        "DO2": str(do2),
+        "EO2": str(eo2),
+        "FO2": str(fo2),
+        "GO2": str(go2),
+        "HO2": str(ho2),
     }
     config["calibration_time"] = {
         "time_points": ", ".join(str(v) for v in data["time_points"]),
@@ -150,6 +164,15 @@ def main() -> int:
     data = parse_def_file(args.def_path)
     write_ini(data, output_path)
     return 0
+
+
+def _derive_output_id(input_file: str, output_file: str) -> str:
+    input_stem = Path(input_file).stem
+    output_stem = Path(output_file).stem
+    if output_stem.startswith(input_stem):
+        suffix = output_stem[len(input_stem):].lstrip("_")
+        return suffix or "reformatted"
+    return output_stem or "reformatted"
 
 
 if __name__ == "__main__":

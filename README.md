@@ -16,7 +16,7 @@ Early setup: repo scaffolding and documentation.
 - `sample_data/`: example inputs/outputs (external)
 
 ## Quick start (placeholder)
-Configuration now uses `vector_formatter.ini`. You can convert legacy `.def` files with:
+Configuration now uses `vector_formatter.ini` (with `output_id` instead of `output_file`). You can convert legacy `.def` files with:
 ```
 python src/def_to_ini.py path\to\file.def
 ```
