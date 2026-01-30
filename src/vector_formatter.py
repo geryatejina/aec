@@ -46,7 +46,7 @@ class Definition:
     input_file: str
     output_id: str
     hour_start_input: float
-    hour_start: float
+    hour_start_output: float
     hour_end_output: float
     input_frequency: float
     output_frequency: float
@@ -138,9 +138,9 @@ def parse_ini_file(path: Path) -> Definition:
     input_file = paths.get("input_file", "")
     output_id = paths.get("output_id", "").strip() or "reformatted"
 
-    hour_start = sampling.getfloat("hour_start_output", fallback=sampling.getfloat("hour_start"))
-    hour_start_input = sampling.getfloat("hour_start_input", fallback=hour_start)
-    hour_end_output = sampling.getfloat("hour_end_output", fallback=hour_start)
+    hour_start_input = sampling.getfloat("hour_start_input")
+    hour_start_output = sampling.getfloat("hour_start_output")
+    hour_end_output = sampling.getfloat("hour_end_output", fallback=hour_start_output)
     input_frequency = sampling.getfloat("input_frequency", fallback=sampling.getfloat("hz"))
     output_frequency = sampling.getfloat("output_frequency", fallback=sampling.getfloat("hz_out"))
     resampling_method = sampling.get("resampling_method", fallback="average").strip().lower()
@@ -498,7 +498,9 @@ def process_definition(
 
         for i in range(len(buffer["vx"])):
             # Hour computed from start time and sample index.
-            hour = definition.hour_start + ((start_index + i + 1) / definition.input_frequency) / 3600.0
+            hour = definition.hour_start_output + ((start_index + i + 1) / definition.input_frequency) / 3600.0
+            if definition.hour_end_output > definition.hour_start_output and hour > definition.hour_end_output:
+                break
             hours.append(hour)
 
             vx.append(buffer["vx"][i] * 100.0)
@@ -539,7 +541,10 @@ def process_definition(
             "o2sat_umol_l": o2sat_umol_l,
         }
 
-        series = _resample_all(series, definition.input_frequency, target_hz, resample_mode)
+        if series["hour"]:
+            series = _resample_all(series, definition.input_frequency, target_hz, resample_mode)
+        else:
+            return
 
         start_hour = series["hour"][0] if series["hour"] else 0.0
         end_hour = series["hour"][-1] if series["hour"] else 0.0
@@ -548,7 +553,7 @@ def process_definition(
             start_hour,
             end_hour,
             start_datetime=definition.start_datetime,
-            hour_start_ref=definition.hour_start,
+            hour_start_ref=definition.hour_start_output,
         )
         with out_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle, lineterminator="\n")
@@ -564,12 +569,13 @@ def process_definition(
                         row,
                         output_columns,
                         start_datetime=definition.start_datetime,
-                        hour_start_ref=definition.hour_start,
+                        hour_start_ref=definition.hour_start_output,
                     )
                 )
 
         chunk_index += 1
 
+    reached_end = False
     for row in _iter_vector_rows(input_path, column_map):
         buffer["vx"].append(row["vx"])
         buffer["vy"].append(row["vy"])
@@ -578,6 +584,12 @@ def process_definition(
         buffer["p_counts"].append(row["p_counts"])
         buffer["q_counts"].append(row["q_counts"])
         sample_index += 1
+
+        if definition.hour_end_output > definition.hour_start_output:
+            current_hour = definition.hour_start_output + (sample_index / definition.input_frequency) / 3600.0
+            if current_hour > definition.hour_end_output:
+                reached_end = True
+                break
 
         if len(buffer["vx"]) >= chunk_samples:
             flush_chunk()

@@ -38,7 +38,9 @@ Early setup: repo scaffolding and documentation.
 ## Configuration
 Configuration uses `vector_formatter.ini`:
 - `[paths]` includes `input_file` and `output_id` (default `reformatted`).
-- `[sampling]` includes `hour_start_*`, `hz`, `hz_out`, and optional `start_date`/`start_time` for timestamped filenames.
+- `[sampling]` includes `hour_start_input`, `hour_start_output`, `hour_end_output`, `input_frequency`, `output_frequency`, `resampling_method`, and optional `start_date`/`start_time` for timestamped filenames.
+- `[sampling]` also includes `hour_end_output`, which stops processing once the output time exceeds this value.
+- When `start_date` and `start_time` are provided (e.g., `2025-02-10` and `15:00`), each output file name uses the chunk start time formatted as `YYYYMMDDTHHMM`, and the TIMESTAMP column is written as `yyyymmddTHHMM.sssssss`.
 - `[environment]` includes `pressure_reference`, `pressure_offset`, `salinity`, `elevation`, `atmospheric_pressure`.
 - Calibration coefficients are explicit per‑coefficient keys under:
   - `[temperature_calibration_coefficients]` (`AT`, `BT`, `CT`, `DT`)
