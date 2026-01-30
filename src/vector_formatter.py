@@ -81,8 +81,8 @@ OUTPUT_LABELS: Dict[str, str] = {
     "vx": "U",
     "vy": "V",
     "vz": "W",
-    "pr_mbar": "P",
-    "temp_c": "T",
+    "pr_mbar": "PW",
+    "temp_c": "TW",
     "o2_umol_l": "O2",
     "o2sat_umol_l": "O2_SAT",
 }
@@ -427,8 +427,8 @@ def _chunk_output_path(
         offset_hours = start_hour - hour_start_ref
         chunk_dt = start_datetime + timedelta(hours=offset_hours)
         stamp = chunk_dt.strftime("%Y%m%dT%H%M")
-        return base.with_name(f"{base.stem}_{stamp}{base.suffix}")
-    return base.with_name(f"{base.stem}_h{start_hour:08.4f}-h{end_hour:08.4f}{base.suffix}")
+        return base.with_name(f"{base.stem}_{stamp}.csv")
+    return base.with_name(f"{base.stem}_h{start_hour:08.4f}-h{end_hour:08.4f}.csv")
 
 
 def process_definition(
@@ -447,7 +447,7 @@ def process_definition(
     if not input_path.is_absolute():
         input_path = ini_path.parent / input_path
 
-    output_base = f"{Path(definition.input_file).stem}_{definition.output_id}.dat"
+    output_base = f"{Path(definition.input_file).stem}_{definition.output_id}.csv"
     output_path = ini_path.parent / output_base
 
     if target_hz is None:
