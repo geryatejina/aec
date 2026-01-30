@@ -108,8 +108,9 @@ def write_ini(data: dict, output_path: Path) -> None:
         "hour_start_output": str(data["hour_start_output"]),
         "hour_end_output": str(data["hour_end_output"]),
         "hour_start": str(data["hour_start"]),
-        "hz": str(data["hz"]),
-        "hz_out": str(data["hz_out"]),
+        "input_frequency": str(data["hz"]),
+        "output_frequency": str(data["hz_out"]),
+        "resampling_method": "average",
     }
     config["environment"] = {
         "pressure_offset": str(data["pressure_offset"]),

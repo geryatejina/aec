@@ -52,19 +52,19 @@ Configuration uses `vector_formatter.ini`:
 - Output defaults to the same path with a `.ini` extension.
 
 ## Quick start
-Convert a legacy `.def`:
+Convert a legacy `.def` file to INI:
 ```
-python src/def_to_ini.py path\to\file.def
+python src/def_to_ini.py C:\Users\geryatejina\OneDrive\dev\aec_project\sample_data\sample.def
 ```
 
 Basic usage (default = no resampling):
 ```
-python src/vector_formatter.py path\to\vector_formatter.ini
+python src/vector_formatter.py C:\Users\geryatejina\OneDrive\dev\aec_project\sample_data\sample.ini
 ```
 
 Enable resampling (downsample/average/interpolate):
 ```
-python src/vector_formatter.py path\to\vector_formatter.ini --enable-resample --resample average --target-hz 16
+python src/vector_formatter.py C:\Users\geryatejina\OneDrive\dev\aec_project\sample_data\sample.ini --enable-resample --resample average --target-hz 16
 ```
 
 ## References

@@ -48,8 +48,9 @@ class Definition:
     hour_start_input: float
     hour_start: float
     hour_end_output: float
-    hz: float
-    hz_out: float
+    input_frequency: float
+    output_frequency: float
+    resampling_method: str
     pressure_offset: float
     salinity: float
     pressure_reference: str  # "elevation" or "atmospheric_pressure"
@@ -140,8 +141,9 @@ def parse_ini_file(path: Path) -> Definition:
     hour_start = sampling.getfloat("hour_start_output", fallback=sampling.getfloat("hour_start"))
     hour_start_input = sampling.getfloat("hour_start_input", fallback=hour_start)
     hour_end_output = sampling.getfloat("hour_end_output", fallback=hour_start)
-    hz = sampling.getfloat("hz")
-    hz_out = sampling.getfloat("hz_out")
+    input_frequency = sampling.getfloat("input_frequency", fallback=sampling.getfloat("hz"))
+    output_frequency = sampling.getfloat("output_frequency", fallback=sampling.getfloat("hz_out"))
+    resampling_method = sampling.get("resampling_method", fallback="average").strip().lower()
     start_datetime = _parse_start_datetime(sampling.get("start_date", fallback=""), sampling.get("start_time", fallback=""))
 
     pressure_offset = environment.getfloat("pressure_offset", fallback=environment.getfloat("pr_offset"))
@@ -452,9 +454,9 @@ def process_definition(
 
     if target_hz is None:
         # Default: no resampling unless explicitly requested.
-        target_hz = definition.hz
+        target_hz = definition.input_frequency
 
-    chunk_samples = int(round(definition.hz * (chunk_minutes * 60)))
+    chunk_samples = int(round(definition.input_frequency * (chunk_minutes * 60)))
     if chunk_samples <= 0:
         raise ValueError("chunk_minutes must be > 0")
 
@@ -496,7 +498,7 @@ def process_definition(
 
         for i in range(len(buffer["vx"])):
             # Hour computed from start time and sample index.
-            hour = definition.hour_start + ((start_index + i + 1) / definition.hz) / 3600.0
+            hour = definition.hour_start + ((start_index + i + 1) / definition.input_frequency) / 3600.0
             hours.append(hour)
 
             vx.append(buffer["vx"][i] * 100.0)
@@ -537,7 +539,7 @@ def process_definition(
             "o2sat_umol_l": o2sat_umol_l,
         }
 
-        series = _resample_all(series, definition.hz, target_hz, resample_mode)
+        series = _resample_all(series, definition.input_frequency, target_hz, resample_mode)
 
         start_hour = series["hour"][0] if series["hour"] else 0.0
         end_hour = series["hour"][-1] if series["hour"] else 0.0
@@ -592,8 +594,8 @@ def main() -> int:
     parser.add_argument(
         "--resample",
         choices=["downsample", "average", "interpolate"],
-        default="average",
-        help="Resampling mode for downscaling",
+        default=None,
+        help="Resampling mode for downscaling (overrides INI if provided).",
     )
     parser.add_argument("--target-hz", type=float, default=None, help="Target frequency (Hz).")
     resample_group = parser.add_mutually_exclusive_group()
@@ -614,13 +616,15 @@ def main() -> int:
 
     if args.enable_resample:
         target_hz = args.target_hz
+        resample_mode = args.resample or definition.resampling_method
     else:
         target_hz = None
+        resample_mode = definition.resampling_method
 
     process_definition(
         args.definition,
         chunk_minutes=args.chunk_minutes,
-        resample_mode=args.resample,
+        resample_mode=resample_mode,
         target_hz=target_hz,
     )
     return 0
